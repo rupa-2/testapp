@@ -1,0 +1,102 @@
+name: testapp-cicd
+
+on:
+  push:
+    paths: 
+      - src/**
+    branches:
+      - main
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+      -
+        name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - 
+        name: Get Hash
+        shell: bash
+        run: |
+         echo "COMMIT_ID=${GITHUB_SHA::6}" >> "$GITHUB_ENV"
+
+      -
+        name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: devir2/testapp:${{ env.COMMIT_ID }}
+    outputs:
+      commit_id: ${{ env.COMMIT_ID }}
+  cd:
+    runs-on: self-hosted
+    needs: ci
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+      -
+        name: modify value file
+        shell: bash
+        run: |
+         echo 
+         pip install yq
+         yq -Yi '.image.tag = "${{needs.ci.outputs.commit_id}}"' charts/testapp/values-dev.yaml
+      
+      - 
+        name: commit changes
+        uses: EndBug/add-and-commit@v9
+        with:
+           message: 'updated values file with commit '
+
+      -
+        name: install argocd
+        shell: bash
+        run: |
+          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+
+      - name: argocd login
+        shell: bash
+        run: |
+          argocd login argocd-server.argocd \
+            --insecure  \
+            --grpc-web \
+            --username admin \
+            --password  ${{ secrets.ARGOCD_PASSWORD }}
+
+      - name: Ensure argocd repo and app
+        shell: bash
+        run: |
+
+          # Connects the argocd repo
+          repo="https://github.com/rupa-2/testapp.git"
+          argocd repo list | grep -q $repo || argocd repo add $repo
+
+          # Creates the argocd app
+          argocd app get testapp || argocd app create testapp \
+            --repo $repo \
+            --path charts/testapp \
+            --dest-namespace dev \
+            --dest-server https://kubernetes.default.svc \
+            --values values-dev.yaml \
+            --revision main \
+            --sync-policy manual \
+            --sync-option CreateNamespace=true
+
+      - name: Argocd app sync
+        shell: bash
+        run: |
+          argocd app sync testapp
+          argocd app wait testapp --timeout 180
+
+         
+
+

@@ -1,0 +1,12 @@
+site_name: 'testapp'
+site_description: 'Main documentation for the testapp'
+repo_url: https://github.com/rupa2/testapp
+edit_uri: edit/main/docs
+
+plugins:
+  - techdocs-core
+
+# For sidebar navigation on https://backstage.io/, see `microsite/sidebars.json`
+nav:
+  - Overview:
+      - Getting started: 'docs/index.md'
